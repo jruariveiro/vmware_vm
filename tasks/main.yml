@@ -1,0 +1,179 @@
+---
+# tasks file for vmware_vm
+
+- name: VMWare | Create Virtual Machine
+  block:
+  - name: VMWare | Set facts for future use
+    set_fact:
+      infra_vmware_vm_vm_memory_mb: 8192
+      infra_vmware_vm_vm_num_cpus: 2
+    when: infra_vmware_vm_vm_flavor == 'small'
+
+  - name: VMWare | Set facts for future use
+    set_fact:
+      infra_vmware_vm_vm_memory_mb: 16384
+      infra_vmware_vm_vm_num_cpus: 4
+    when: infra_vmware_vm_vm_flavor == 'medium'
+
+  - name: VMWare | Set facts for future use
+    set_fact:
+      infra_vmware_vm_vm_memory_mb: 32768
+      infra_vmware_vm_vm_num_cpus: 8
+    when: infra_vmware_vm_vm_flavor == 'large'
+
+  - name: VMWare | Set facts for future use
+    set_fact:
+      infra_vmware_vm_vm_memory_mb: 65536
+      infra_vmware_vm_vm_num_cpus: 8
+    when: infra_vmware_vm_vm_flavor == 'xlarge'
+
+  - name: VMWare | Create virtual machine
+    vmware_guest:
+      hostname: "{{ infra_vmware_vm_vcenter_server }}"
+      username: "{{ ldap_username }}"
+      password: "{{ ldap_password }}"
+      datacenter: "{{ infra_vmware_vm_vcenter_datacenter }}"
+      cluster: "{{ infra_vmware_vm_vcenter_cluster }}"
+      validate_certs: no
+      folder: "{{ infra_vmware_vm_vm_folder | d ('/') }}"
+      name: "{{ infra_vmware_vm_vm_name }}"
+      state: "{{ infra_vmware_vm_vm_state | d ('poweredoff') }}"
+      guest_id: "{{ infra_vmware_vm_vm_guest_id | d ('centos7_64Guest') }}"
+      disk:
+      - size_gb: "{{ infra_vmware_vm_vm_disk_size | d (50) }}"
+        type: "{{ infra_vmware_vm_vm_disk_type | d (eagerzeroedthick) }}"
+        datastore: "{{ infra_vmware_vm_vcenter_datastore }}"
+
+      networks:
+      - name: "{{ infra_vmware_vm_vm_network | d('Network1') }}"
+        ip: "{{ infra_vmware_vm_vm_ip }}"
+        netmask: "{{ infra_vmware_vm_vm_netmask | d ('255.255.255.0') }}"
+        start_connected: true
+        device_type: vmxnet3
+      wait_for_ip_address: false
+
+      hardware:
+        memory_mb: "{{ infra_vmware_vm_vm_memory_mb | d (8192) }}"
+        num_cpus: "{{ infra_vmware_vm_vm_num_cpus | d (2) }}"
+        hotadd_cpu: true
+        hotadd_memory: true
+        scsi: paravirtual
+        version: 13
+    register: infra_vmware_vm_vm_created
+
+  - name: VMWare | Create Virtual Machine Custom Attributes
+    vmware_guest_custom_attributes:
+      hostname: "{{ infra_vmware_vm_vcenter_server }}"
+      username: "{{ ldap_username }}"
+      password: "{{ ldap_password }}"
+      datacenter: "{{ infra_vmware_vm_vcenter_datacenter }}"
+      validate_certs: no
+      folder: "{{ infra_vmware_vm_vm_folder | d ('/') }}"
+      name: "{{ infra_vmware_vm_vm_name }}"
+      state: present
+      attributes:
+        - name: createdBy
+          value: "{{ ldap_username }}"
+        - name: createdAt
+          value: "{{ lookup('pipe','date') }}"
+        - name: vmProfile
+          value: "{{ infra_vmware_vm_vm_name_vm_profile | d('base7') }}"
+
+    register: vm_custom_attributes
+    # This module is only available from ansible 2.8
+    when:
+      - ansible_version.major|int >= 2
+      - ansible_version.minor|int >= 8
+
+  - name: VMWare | Add secondary disk to Virtual Machine
+    vmware_guest_disk:
+      hostname: "{{ infra_vmware_vm_vcenter_server }}"
+      username: "{{ ldap_username }}"
+      password: "{{ ldap_password }}"
+      datacenter: "{{ infra_vmware_vm_vcenter_datacenter }}"
+
+      validate_certs: no
+      folder: "{{ infra_vmware_vm_vm_folder | d ('/') }}"
+      name: "{{ infra_vmware_vm_vm_name }}"
+
+      disk:
+      - size_gb: "{{ infra_vmware_vm_vm_secondary_disk_size | d (50) }}"
+        type: "{{ infra_vmware_vm_vm_secondary_disk_type | d (eagerzeroedthick) }}"
+        datastore: "{{ infra_vmware_vm_vcenter_datastore }}"
+        state: present
+        scsi_controller: 1
+        unit_number: 1
+        scsi: paravirtual
+
+    register: infra_vmware_vm_vm_secondary_disks
+    when:
+      - infra_vmware_vm_add_secondary_disk | d(False) | bool
+      - infra_vmware_vm_vm_created is defined
+
+  - name: Assert that VM {{ infra_vmware_vm_vm_name }} is created
+    assert:
+      that:
+        - "infra_vmware_vm_vm_created is defined"
+
+  - name: VMWare | Set Virtual Machine boot order
+    vmware_guest_boot_manager:
+       hostname: "{{ infra_vmware_vm_vcenter_server }}"
+       username: "{{ ldap_username }}"
+       password: "{{ ldap_password }}"
+       name: "{{ infra_vmware_vm_vm_name }}"
+       validate_certs: no
+       boot_delay: 2000
+       boot_retry_enabled: True
+       boot_retry_delay: 22300
+       boot_firmware: bios
+       boot_order:
+        - ethernet
+        - disk
+        - cdrom
+        - floppy
+
+  when: infra_vmware_vm_action == 'createvm'
+
+- name: VMWare | Delete Virtual Machine
+  block:
+  - name: VMWare | Check that VM exists using hostname and register UUID
+    vmware_guest_facts:
+      hostname: "{{ infra_vmware_vm_vcenter_server }}"
+      username: "{{ ldap_username }}"
+      password: "{{ ldap_password }}"
+      datacenter: "{{ infra_vmware_vm_vcenter_datacenter }}"
+
+      validate_certs: no
+      folder: "{{ infra_vmware_vm_vm_folder | d ('/') }}"
+      name: "{{ infra_vmware_vm_vm_name }}"
+
+    register: infra_vmware_vm_vm_facts
+    ignore_errors: true
+
+  - name: VMWare | Display Virtual Machine UUID
+    set_fact:
+      vm_uuid: "{{ infra_vmware_vm_vm_facts | json_query(s_query) }}"
+    vars:
+      s_query: "instance.hw_product_uuid"
+
+  - name: VMWare | Delete Virtual Machine by UUID
+    block:
+
+    - name: VMWare | Delete Virtual Machine by UUID
+      vmware_guest:
+        hostname: "{{ infra_vmware_vm_vcenter_server }}"
+        username: "{{ ldap_username }}"
+        password: "{{ ldap_password }}"
+        datacenter: "{{ infra_vmware_vm_vcenter_datacenter }}"
+
+        validate_certs: no
+        uuid: "{{ infra_vmware_vm_vm_facts.instance.hw_product_uuid }}"
+        state: absent
+      register: infra_vmware_vm_vm_deleted
+
+    - name: Assert that VM {{ infra_vmware_vm_vm_name }} is deleted
+      assert:
+        that:
+          - "infra_vmware_vm_vm_deleted.changed"
+    when: infra_vmware_vm_vm_facts.instance.hw_product_uuid is defined
+  when: infra_vmware_vm_action == 'deletevm'

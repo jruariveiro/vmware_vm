@@ -1,0 +1,26 @@
+---
+- name: Converge
+  hosts: all
+  vars:
+    infra_vmware_vm_action: "createvm"
+    infra_vmware_vm_vm_flavor: 'small'
+    infra_vmware_vm_vcenter_server: 'lab-vcenter.mylab.local'
+    infra_vmware_vm_vcenter_datacenter: "DCLAB"
+    infra_vmware_vm_vcenter_cluster: "Cluster-1"
+    infra_vmware_vm_vm_name: 'molecule_test.mylab.local'
+    infra_vmware_vm_vm_state: 'poweredoff'
+    infra_vmware_vm_vm_guest_id: 'centos7_64Guest'
+    infra_vmware_vm_vm_disk_size: 50
+    infra_vmware_vm_vm_disk_type: 'eagerzeroedthick'
+    infra_vmware_vm_vcenter_datastore: 'General-iSCSI'
+    infra_vmware_vm_add_secondary_disk: true
+    infra_vmware_vm_vm_secondary_disk_size: 100
+    infra_vmware_vm_vm_secondary_disk_type: 'eagerzeroedthick'
+    infra_vmware_vm_vm_network: 'Network1'
+    infra_vmware_vm_vm_ip: '192.168.10.123'
+    infra_vmware_vm_vm_netmask: '255.255.255.0'
+    ldap_username: "your_ldap_username"
+    ldap_password: "your_ldap_password"
+  roles:
+    - role: vmware_vm
+      delegate_to: localhost
